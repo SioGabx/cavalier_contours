@@ -8,8 +8,8 @@ use crate::{
         traits::Real,
     },
     polyline::{
-        FindIntersectsOptions, PlineCreation, PlineOffsetOptions, PlineSegIntr, PlineSource,
-        PlineSourceMut, PlineVertex, PlineViewData,
+        FindIntersectsOptions, LineJoin, PlineCreation, PlineOffsetOptions, PlineSegIntr,
+        PlineSource, PlineSourceMut, PlineVertex, PlineViewData,
         internal::pline_intersects::{all_self_intersects_as_basic, find_intersects},
         pline_seg_intr, seg_arc_radius_and_center, seg_closest_point, seg_fast_approx_bounding_box,
         seg_midpoint,
@@ -144,6 +144,50 @@ struct JoinParams<T> {
     connection_arcs_ccw: bool,
     /// Epsilon to use for testing if positions are fuzzy equal.
     pos_equal_eps: T,
+    /// Join type to use at corners between offset segments.
+    join_type: LineJoin,
+    /// Miter limit (only consulted for [LineJoin::Miter]).
+    miter_limit: T,
+    /// Absolute value of the offset distance (used for miter limit testing).
+    offset_abs: T,
+}
+
+/// Connect two raw offset segments by joining them with a straight line (bevel) and push the
+/// vertexes to the `result` output parameter.
+#[inline]
+fn connect_using_line<T, O>(
+    s1: &RawPlineOffsetSeg<T>,
+    s2: &RawPlineOffsetSeg<T>,
+    result: &mut O,
+    pos_equal_eps: T,
+) where
+    T: Real,
+    O: PlineSourceMut<Num = T>,
+{
+    let sp = s1.v2.pos();
+    let ep = s2.v1.pos();
+    result.add_or_replace(sp.x, sp.y, T::zero(), pos_equal_eps);
+    result.add_or_replace(ep.x, ep.y, s2.v1.bulge, pos_equal_eps);
+}
+
+/// Test whether the miter length (distance from the original corner vertex to the miter point)
+/// exceeds the miter limit. Comparison is done with squared values to avoid a square root.
+#[inline]
+fn miter_exceeds_limit<T>(
+    orig_corner: Vector2<T>,
+    miter_point: Vector2<T>,
+    offset_abs: T,
+    miter_limit: T,
+) -> bool
+where
+    T: Real,
+{
+    if offset_abs.fuzzy_eq_zero() {
+        return false;
+    }
+    let miter_len_sq = dist_squared(orig_corner, miter_point);
+    let limit_len = miter_limit * offset_abs;
+    miter_len_sq > limit_len * limit_len
 }
 
 /// Join two adjacent raw offset segments where both segments are lines.
@@ -158,6 +202,7 @@ fn line_line_join<T, O>(
 {
     let connection_arcs_ccw = params.connection_arcs_ccw;
     let pos_equal_eps = params.pos_equal_eps;
+    let join_type = params.join_type;
     let v1 = &s1.v1;
     let v2 = &s1.v2;
     let u1 = &s2.v1;
@@ -174,16 +219,26 @@ fn line_line_join<T, O>(
     } else {
         match line_line_intr(v1.pos(), v2.pos(), u1.pos(), u2.pos(), pos_equal_eps) {
             LineLineIntr::NoIntersect => {
-                // parallel lines, join with half circle
-                let sp = s1.v2.pos();
-                let ep = s2.v1.pos();
-                let bulge = if connection_arcs_ccw {
-                    T::one()
-                } else {
-                    -T::one()
-                };
-                result.add_or_replace(sp.x, sp.y, bulge, pos_equal_eps);
-                result.add_or_replace(ep.x, ep.y, s2.v1.bulge, pos_equal_eps);
+                // parallel lines
+                match join_type {
+                    LineJoin::Round => {
+                        // join with half circle
+                        let sp = s1.v2.pos();
+                        let ep = s2.v1.pos();
+                        let bulge = if connection_arcs_ccw {
+                            T::one()
+                        } else {
+                            -T::one()
+                        };
+                        result.add_or_replace(sp.x, sp.y, bulge, pos_equal_eps);
+                        result.add_or_replace(ep.x, ep.y, s2.v1.bulge, pos_equal_eps);
+                    }
+                    // miter is unbounded for parallel lines; bevel and miter-fallback connect
+                    // with a straight line between the offset endpoints
+                    LineJoin::Miter | LineJoin::Bevel => {
+                        connect_using_line(s1, s2, result, pos_equal_eps);
+                    }
+                }
             }
             LineLineIntr::TrueIntersect { seg1_t, .. } => {
                 let intr_point = point_from_parametric(v1.pos(), v2.pos(), seg1_t);
@@ -194,8 +249,33 @@ fn line_line_join<T, O>(
             }
             LineLineIntr::FalseIntersect { seg1_t, seg2_t } => {
                 if seg1_t > T::one() && is_false_intersect(seg2_t) {
-                    // extend and join the lines together using arc
-                    connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+                    // segments must be extended to meet at the corner
+                    match join_type {
+                        LineJoin::Round => {
+                            connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+                        }
+                        LineJoin::Miter => {
+                            let intr_point = point_from_parametric(v1.pos(), v2.pos(), seg1_t);
+                            if miter_exceeds_limit(
+                                s1.orig_v2_pos,
+                                intr_point,
+                                params.offset_abs,
+                                params.miter_limit,
+                            ) {
+                                connect_using_line(s1, s2, result, pos_equal_eps);
+                            } else {
+                                result.add_or_replace(
+                                    intr_point.x,
+                                    intr_point.y,
+                                    T::zero(),
+                                    pos_equal_eps,
+                                );
+                            }
+                        }
+                        LineJoin::Bevel => {
+                            connect_using_line(s1, s2, result, pos_equal_eps);
+                        }
+                    }
                 } else {
                     result.add_or_replace(v2.x, v2.y, T::zero(), pos_equal_eps);
                     result.add_or_replace(u1.x, u1.y, u1.bulge, pos_equal_eps);
@@ -260,25 +340,65 @@ fn line_arc_join<T, O>(
             return;
         }
 
-        if t > T::one() && !true_arc_intr {
-            connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
-            return;
-        }
-
+        // For collapsed arcs always use the round arc connection regardless of join mode.
         if s1.collapsed_arc {
             connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
             return;
         }
 
-        // connect using line
-        result.add_or_replace(v2.x, v2.y, T::zero(), pos_equal_eps);
-        result.add_or_replace_vertex(*u1, pos_equal_eps);
+        // Extension required (segments do not both reach the intersect within their extents).
+        match params.join_type {
+            LineJoin::Round => {
+                // preserve historical round behavior
+                if t > T::one() && !true_arc_intr {
+                    connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+                } else {
+                    // connect using line
+                    result.add_or_replace(v2.x, v2.y, T::zero(), pos_equal_eps);
+                    result.add_or_replace_vertex(*u1, pos_equal_eps);
+                }
+            }
+            LineJoin::Bevel => {
+                connect_using_line(s1, s2, result, pos_equal_eps);
+            }
+            LineJoin::Miter => {
+                if miter_exceeds_limit(
+                    s1.orig_v2_pos,
+                    intersect,
+                    params.offset_abs,
+                    params.miter_limit,
+                ) {
+                    connect_using_line(s1, s2, result, pos_equal_eps);
+                } else {
+                    // extend the line and arc to meet at the intersect point
+                    let a = angle(arc_center, intersect);
+                    let arc_end_angle = angle(arc_center, u2.pos());
+                    let theta = delta_angle(a, arc_end_angle);
+                    if (theta > T::zero()) == u1.bulge_is_pos() {
+                        result.add_or_replace(
+                            intersect.x,
+                            intersect.y,
+                            bulge_from_angle(theta),
+                            pos_equal_eps,
+                        );
+                    } else {
+                        result.add_or_replace(intersect.x, intersect.y, u1.bulge, pos_equal_eps);
+                    }
+                }
+            }
+        }
     };
 
     match line_circle_intr(v1.pos(), v2.pos(), arc_radius, arc_center, pos_equal_eps) {
-        LineCircleIntr::NoIntersect => {
-            connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
-        }
+        LineCircleIntr::NoIntersect => match params.join_type {
+            LineJoin::Round => {
+                connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+            }
+            // no intersect point available for parallel/missed geometry; miter is unbounded
+            LineJoin::Miter | LineJoin::Bevel => {
+                connect_using_line(s1, s2, result, pos_equal_eps);
+            }
+        },
         LineCircleIntr::TangentIntersect { t0 } => {
             process_intersect(t0, point_from_parametric(v1.pos(), v2.pos(), t0));
         }
@@ -355,13 +475,58 @@ fn arc_line_join<T, O>(
             return;
         }
 
-        connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+        // For collapsed arcs always use the round arc connection regardless of join mode.
+        if s2.collapsed_arc {
+            connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+            return;
+        }
+
+        match params.join_type {
+            LineJoin::Round => {
+                connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+            }
+            LineJoin::Bevel => {
+                connect_using_line(s1, s2, result, pos_equal_eps);
+            }
+            LineJoin::Miter => {
+                if miter_exceeds_limit(
+                    s1.orig_v2_pos,
+                    intersect,
+                    params.offset_abs,
+                    params.miter_limit,
+                ) {
+                    connect_using_line(s1, s2, result, pos_equal_eps);
+                } else {
+                    // extend the arc to meet the line at the intersect point
+                    let prev_vertex = result.last().unwrap();
+                    if !prev_vertex.bulge_is_zero()
+                        && !prev_vertex.pos().fuzzy_eq_eps(v2.pos(), pos_equal_eps)
+                    {
+                        let a = angle(arc_center, intersect);
+                        let (_, prev_arc_center) = seg_arc_radius_and_center(prev_vertex, *v2);
+                        let prev_arc_start_angle = angle(prev_arc_center, prev_vertex.pos());
+                        let updated_prev_theta = delta_angle(prev_arc_start_angle, a);
+                        if (updated_prev_theta > T::zero()) == prev_vertex.bulge_is_pos() {
+                            let last = result.last().unwrap();
+                            result.set_last(last.with_bulge(bulge_from_angle(updated_prev_theta)));
+                        }
+                    }
+                    result.add_or_replace(intersect.x, intersect.y, T::zero(), pos_equal_eps);
+                }
+            }
+        }
     };
 
     match line_circle_intr(u1.pos(), u2.pos(), arc_radius, arc_center, pos_equal_eps) {
-        LineCircleIntr::NoIntersect => {
-            connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
-        }
+        LineCircleIntr::NoIntersect => match params.join_type {
+            LineJoin::Round => {
+                connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+            }
+            // no intersect point available; miter is unbounded, fall back to bevel
+            LineJoin::Miter | LineJoin::Bevel => {
+                connect_using_line(s1, s2, result, pos_equal_eps);
+            }
+        },
         LineCircleIntr::TangentIntersect { t0 } => {
             process_intersect(t0, point_from_parametric(u1.pos(), u2.pos(), t0));
         }
@@ -430,9 +595,19 @@ fn arc_arc_join<T, O>(
     };
 
     let mut process_intersect = |intersect: Vector2<T>, true_intersect: bool| {
-        if !true_intersect {
-            connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
-        } else {
+        // `do_extend` covers the true-intersect trim (all join modes) and the miter extension
+        // (when the miter length is within the limit). Otherwise the corner is connected using
+        // the join-type fallback (round arc or bevel line).
+        let do_extend = true_intersect
+            || (matches!(params.join_type, LineJoin::Miter)
+                && !miter_exceeds_limit(
+                    s1.orig_v2_pos,
+                    intersect,
+                    params.offset_abs,
+                    params.miter_limit,
+                ));
+
+        if do_extend {
             let prev_vertex = result.last().unwrap();
 
             if !prev_vertex.bulge_is_zero()
@@ -467,6 +642,15 @@ fn arc_arc_join<T, O>(
             } else {
                 result.add_or_replace(intersect.x, intersect.y, u1.bulge, pos_equal_eps);
             }
+        } else {
+            match params.join_type {
+                LineJoin::Round => {
+                    connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+                }
+                LineJoin::Miter | LineJoin::Bevel => {
+                    connect_using_line(s1, s2, result, pos_equal_eps);
+                }
+            }
         }
     };
 
@@ -477,9 +661,15 @@ fn arc_arc_join<T, O>(
         arc2_center,
         pos_equal_eps,
     ) {
-        CircleCircleIntr::NoIntersect => {
-            connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
-        }
+        CircleCircleIntr::NoIntersect => match params.join_type {
+            LineJoin::Round => {
+                connect_using_arc(s1, s2, connection_arcs_ccw, result, pos_equal_eps);
+            }
+            // no intersect point available; miter is unbounded, fall back to bevel
+            LineJoin::Miter | LineJoin::Bevel => {
+                connect_using_line(s1, s2, result, pos_equal_eps);
+            }
+        },
         CircleCircleIntr::TangentIntersect { point } => {
             process_intersect(point, both_arcs_sweep_point(point));
         }
@@ -510,7 +700,13 @@ fn arc_arc_join<T, O>(
     }
 }
 
-pub fn create_raw_offset_polyline<P, T, O>(polyline: &P, offset: T, pos_equal_eps: T) -> O
+pub fn create_raw_offset_polyline<P, T, O>(
+    polyline: &P,
+    offset: T,
+    pos_equal_eps: T,
+    join_type: LineJoin,
+    miter_limit: T,
+) -> O
 where
     P: PlineSource<Num = T> + ?Sized,
     T: Real,
@@ -535,6 +731,9 @@ where
     let join_params = JoinParams {
         connection_arcs_ccw,
         pos_equal_eps,
+        join_type,
+        miter_limit,
+        offset_abs: offset.abs(),
     };
 
     let join_seg_pair = |s1: &RawPlineOffsetSeg<T>, s2: &RawPlineOffsetSeg<T>, result: &mut O| {
@@ -1500,7 +1699,13 @@ where
         &constructed_index
     };
 
-    let raw_offset: O = create_raw_offset_polyline(polyline, offset, options.pos_equal_eps);
+    let raw_offset: O = create_raw_offset_polyline(
+        polyline,
+        offset,
+        options.pos_equal_eps,
+        options.join_type,
+        options.miter_limit,
+    );
     if raw_offset.is_empty() {
         Vec::new()
     } else if polyline.is_closed() && !options.handle_self_intersects {
@@ -1513,7 +1718,13 @@ where
             options,
         )
     } else {
-        let dual_raw_offset = create_raw_offset_polyline(polyline, -offset, options.pos_equal_eps);
+        let dual_raw_offset = create_raw_offset_polyline(
+            polyline,
+            -offset,
+            options.pos_equal_eps,
+            options.join_type,
+            options.miter_limit,
+        );
         let slices = slices_from_dual_raw_offsets(
             polyline,
             &raw_offset,

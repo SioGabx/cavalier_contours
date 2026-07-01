@@ -13,6 +13,16 @@
 #define CAVC_SELF_INTERSECTS_INCLUDE_GLOBAL 2
 
 /**
+ * FFI representation of a LineJoin value used by cavc_pline_parallel_offset_o and
+ * cavc_shape_offset_o. 0 = Round, 1 = Miter, 2 = Bevel.
+ */
+#define CAVC_LINE_JOIN_ROUND 0
+
+#define CAVC_LINE_JOIN_MITER 1
+
+#define CAVC_LINE_JOIN_BEVEL 2
+
+/**
  * FFI Representation of PlineContainsResult enum
  */
 #define CAVC_CONTAINS_RESULT_INVALID_INPUT 0
@@ -66,6 +76,8 @@ typedef struct cavc_pline_parallel_offset_o {
   double slice_join_eps;
   double offset_dist_eps;
   uint8_t handle_self_intersects;
+  uint8_t join_type;
+  double miter_limit;
 } cavc_pline_parallel_offset_o;
 
 /**
@@ -109,6 +121,8 @@ typedef struct cavc_shape_offset_o {
   double pos_equal_eps;
   double offset_dist_eps;
   double slice_join_eps;
+  uint8_t join_type;
+  double miter_limit;
 } cavc_shape_offset_o;
 
 /**

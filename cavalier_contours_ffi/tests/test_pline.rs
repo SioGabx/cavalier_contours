@@ -423,6 +423,8 @@ fn pline_eval_parallel_offset() {
             slice_join_eps: f64::NAN,
             offset_dist_eps: f64::NAN,
             handle_self_intersects: 0,
+            join_type: 0,
+            miter_limit: f64::NAN,
         };
 
         let mut results = ptr::null();
@@ -431,6 +433,8 @@ fn pline_eval_parallel_offset() {
             assert!(!options.pos_equal_eps.is_nan());
             assert!(!options.slice_join_eps.is_nan());
             assert!(!options.offset_dist_eps.is_nan());
+            assert_eq!(options.join_type, 0);
+            assert!(!options.miter_limit.is_nan());
 
             let mut aabb_index = ptr::null();
 
@@ -1048,6 +1052,8 @@ fn shape_eval_ffi() {
                 pos_equal_eps: 0.0001,
                 offset_dist_eps: 0.001,
                 slice_join_eps: 0.001,
+                join_type: 0,
+                miter_limit: 4.0,
             };
             let mut result_shape = ptr::null_mut();
             assert_eq!(

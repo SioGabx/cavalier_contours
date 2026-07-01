@@ -3,7 +3,7 @@
 use cavalier_contours::{
     core::math::Vector2,
     polyline::{
-        BooleanOp, PlineBooleanOptions, PlineContainsOptions, PlineOffsetOptions,
+        BooleanOp, LineJoin, PlineBooleanOptions, PlineContainsOptions, PlineOffsetOptions,
         PlineSelfIntersectOptions, PlineSource, PlineSourceMut, PlineVertex, Polyline,
         SelfIntersectsInclude,
     },
@@ -75,6 +75,26 @@ impl cavc_vertex {
 #[derive(Debug, Clone)]
 pub struct cavc_pline(pub Polyline<f64>);
 
+/// FFI representation of a [LineJoin] value used by [cavc_pline_parallel_offset_o] and
+/// [cavc_shape_parallel_offset_o].
+///
+/// 0 = [LineJoin::Round], 1 = [LineJoin::Miter], 2 = [LineJoin::Bevel].
+pub const CAVC_LINE_JOIN_ROUND: u8 = 0;
+/// Miter join. See [LineJoin::Miter].
+pub const CAVC_LINE_JOIN_MITER: u8 = 1;
+/// Bevel join. See [LineJoin::Bevel].
+pub const CAVC_LINE_JOIN_BEVEL: u8 = 2;
+
+/// Convert a FFI join type `u8` value to the internal [LineJoin]. Values outside the known set
+/// fall back to [LineJoin::Round] (the default).
+fn cavc_line_join_from_u8(value: u8) -> LineJoin {
+    match value {
+        CAVC_LINE_JOIN_MITER => LineJoin::Miter,
+        CAVC_LINE_JOIN_BEVEL => LineJoin::Bevel,
+        _ => LineJoin::Round,
+    }
+}
+
 /// FFI representation of [PlineOffsetOptions].
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -84,6 +104,10 @@ pub struct cavc_pline_parallel_offset_o {
     pub slice_join_eps: f64,
     pub offset_dist_eps: f64,
     pub handle_self_intersects: u8,
+    /// Join type, one of `CAVC_LINE_JOIN_*`. Defaults to [CAVC_LINE_JOIN_ROUND].
+    pub join_type: u8,
+    /// Miter limit used when `join_type == CAVC_LINE_JOIN_MITER`. Defaults to 4.0.
+    pub miter_limit: f64,
 }
 
 impl cavc_pline_parallel_offset_o {
@@ -100,6 +124,8 @@ impl cavc_pline_parallel_offset_o {
             slice_join_eps: self.slice_join_eps,
             offset_dist_eps: self.offset_dist_eps,
             handle_self_intersects: self.handle_self_intersects != 0,
+            join_type: cavc_line_join_from_u8(self.join_type),
+            miter_limit: self.miter_limit,
         }
     }
 }
@@ -113,6 +139,8 @@ impl Default for cavc_pline_parallel_offset_o {
             slice_join_eps: d.slice_join_eps,
             offset_dist_eps: d.offset_dist_eps,
             handle_self_intersects: d.handle_self_intersects as u8,
+            join_type: CAVC_LINE_JOIN_ROUND,
+            miter_limit: d.miter_limit,
         }
     }
 }
@@ -1930,6 +1958,10 @@ pub struct cavc_shape_offset_o {
     pub pos_equal_eps: f64,
     pub offset_dist_eps: f64,
     pub slice_join_eps: f64,
+    /// Join type, one of `CAVC_LINE_JOIN_*`. Defaults to [CAVC_LINE_JOIN_ROUND].
+    pub join_type: u8,
+    /// Miter limit used when `join_type == CAVC_LINE_JOIN_MITER`. Defaults to 4.0.
+    pub miter_limit: f64,
 }
 
 impl cavc_shape_offset_o {
@@ -1939,6 +1971,8 @@ impl cavc_shape_offset_o {
             pos_equal_eps: self.pos_equal_eps,
             offset_dist_eps: self.offset_dist_eps,
             slice_join_eps: self.slice_join_eps,
+            join_type: cavc_line_join_from_u8(self.join_type),
+            miter_limit: self.miter_limit,
         }
     }
 }
@@ -1950,6 +1984,8 @@ impl Default for cavc_shape_offset_o {
             pos_equal_eps: d.pos_equal_eps,
             offset_dist_eps: d.offset_dist_eps,
             slice_join_eps: d.slice_join_eps,
+            join_type: CAVC_LINE_JOIN_ROUND,
+            miter_limit: d.miter_limit,
         }
     }
 }

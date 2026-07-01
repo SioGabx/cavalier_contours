@@ -8,8 +8,8 @@ use crate::{
         traits::Real,
     },
     polyline::{
-        FindIntersectsOptions, PlineBasicIntersect, PlineOffsetOptions, PlineOrientation,
-        PlineSource, PlineSourceMut, PlineViewData, Polyline,
+        FindIntersectsOptions, LineJoin, PlineBasicIntersect, PlineOffsetOptions,
+        PlineOrientation, PlineSource, PlineSourceMut, PlineViewData, Polyline,
         internal::pline_offset::point_valid_for_offset, seg_midpoint,
     },
 };
@@ -85,6 +85,8 @@ where
             pos_equal_eps: options.pos_equal_eps,
             slice_join_eps: options.slice_join_eps,
             offset_dist_eps: options.offset_dist_eps,
+            join_type: options.join_type,
+            miter_limit: options.miter_limit,
         };
 
         self.polyline.parallel_offset_opt(offset, &opts)
@@ -117,6 +119,12 @@ pub struct ShapeOffsetOptions<T> {
     /// Fuzzy comparison epsilon used for determining if two positions are equal when stitching
     /// polyline slices together.
     pub slice_join_eps: T,
+    /// Join type to use when connecting adjacent offset segments at a corner. Defaults to
+    /// [LineJoin::Round].
+    pub join_type: LineJoin,
+    /// Miter limit used when [LineJoin::Miter] is selected. Ignored for [LineJoin::Round] and
+    /// [LineJoin::Bevel]. Defaults to [crate::polyline::DEFAULT_MITER_LIMIT].
+    pub miter_limit: T,
 }
 
 impl<T> ShapeOffsetOptions<T>
@@ -129,6 +137,8 @@ where
             pos_equal_eps: T::from(1e-5).unwrap(),
             offset_dist_eps: T::from(1e-4).unwrap(),
             slice_join_eps: T::from(1e-4).unwrap(),
+            join_type: LineJoin::default(),
+            miter_limit: T::from(crate::polyline::DEFAULT_MITER_LIMIT).unwrap(),
         }
     }
 }

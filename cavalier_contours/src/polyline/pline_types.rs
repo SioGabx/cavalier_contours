@@ -38,6 +38,23 @@ where
     pub distance: T,
 }
 
+/// Join type used when connecting adjacent offset segments at a polyline corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum LineJoin {
+    /// Connect segments using a round arc (default, matches prior library behavior).
+    #[default]
+    Round,
+    /// Extend segments until they meet at a single miter point. If the miter length exceeds
+    /// `miter_limit * |offset|` then the corner falls back to a [LineJoin::Bevel].
+    Miter,
+    /// Connect segments with a straight line between their offset endpoints (no extension).
+    Bevel,
+}
+
+/// Default miter limit used when [LineJoin::Miter] is selected. Matches the SVG/CSS default of 4.0.
+pub const DEFAULT_MITER_LIMIT: f64 = 4.0;
+
 /// Struct to hold options parameters when performing polyline offset.
 #[derive(Debug, Clone)]
 pub struct PlineOffsetOptions<'a, T = f64>
@@ -63,6 +80,13 @@ where
     /// Fuzzy comparison epsilon used when testing distance of slices to original polyline for
     /// validity.
     pub offset_dist_eps: T,
+    /// Join type to use when connecting adjacent offset segments at a corner. Defaults to
+    /// [LineJoin::Round] (the historical library behavior).
+    pub join_type: LineJoin,
+    /// Miter limit used when [LineJoin::Miter] is selected. When the miter length exceeds
+    /// `miter_limit * |offset|` the corner is clipped to a [LineJoin::Bevel]. Ignored for
+    /// [LineJoin::Round] and [LineJoin::Bevel]. Defaults to [DEFAULT_MITER_LIMIT].
+    pub miter_limit: T,
 }
 
 impl<T> PlineOffsetOptions<'_, T>
@@ -77,6 +101,8 @@ where
             pos_equal_eps: T::from(1e-5).unwrap(),
             slice_join_eps: T::from(1e-4).unwrap(),
             offset_dist_eps: T::from(1e-4).unwrap(),
+            join_type: LineJoin::default(),
+            miter_limit: T::from(DEFAULT_MITER_LIMIT).unwrap(),
         }
     }
 }

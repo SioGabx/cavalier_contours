@@ -413,8 +413,13 @@ fn build_offset(
 fn build_raw_offset(pline: &Polyline, offset: &f64) -> SceneState {
     let offset_opt = PlineOffsetOptions::default();
 
-    let raw_offset_pline: Polyline =
-        create_raw_offset_polyline(pline, *offset, offset_opt.pos_equal_eps);
+    let raw_offset_pline: Polyline = create_raw_offset_polyline(
+        pline,
+        *offset,
+        offset_opt.pos_equal_eps,
+        offset_opt.join_type,
+        offset_opt.miter_limit,
+    );
 
     SceneState::RawOffset { raw_offset_pline }
 }

@@ -57,7 +57,7 @@ See more examples [here](examples/README.md).
 ## Known Limitations
 
 - Bulge values for arcs only support values between -1.0 and 1.0 (up to half-circle) for arcs, workaround: use multiple arc segments to form larger arcs
-- Only [rounded joins](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/stroke-linejoin#round) are supported for parallel offsets (other join types are not implemented)
+- Parallel offsets support `Miter`, `Round`, and `Bevel` join types via `PlineOffsetOptions::join_type` (default `Round`); miter joins are clipped to a bevel when the miter length exceeds `PlineOffsetOptions::miter_limit * |offset|` (default miter limit `4.0`)
 - Parallel offsets and boolean operations behave differently for resulting overlapping segments:
   - Parallel offset result always retains overlapping segments (longest valid connection when joining slices)
   - Boolean operation result always combines/merges/removes overlapping segments (based on boolean operation)
