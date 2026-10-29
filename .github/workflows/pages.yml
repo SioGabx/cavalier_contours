@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
 # to only run when you do a new github release, comment out above part and uncomment the below trigger.
 # on:
 #   release:
@@ -22,6 +23,25 @@ jobs:
         working-directory: ./cavalier_contours_ui
     steps:
       - uses: actions/checkout@v4 # repo checkout
+      - name: Resolve public URL
+        id: public-url
+        shell: bash
+        env:
+          PAGES_PUBLIC_URL: ${{ vars.PAGES_PUBLIC_URL }}
+        run: |
+          if [ -n "${PAGES_PUBLIC_URL}" ]; then
+            resolved="${PAGES_PUBLIC_URL}"
+          else
+            owner="${GITHUB_REPOSITORY_OWNER}"
+            repo="${GITHUB_REPOSITORY#*/}"
+            if [ "${repo}" = "${owner}.github.io" ]; then
+              resolved="https://${owner}.github.io"
+            else
+              resolved="https://${owner}.github.io/${repo}"
+            fi
+          fi
+          echo "value=${resolved}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved public URL: ${resolved}"
       - name: Setup toolchain for wasm
         run: |
           rustup update stable
@@ -33,15 +53,11 @@ jobs:
       - name: Download and install Trunk binary
         run: wget -qO- https://github.com/thedodd/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
       - name: Build # build
-        # Environment $public_url resolves to the github project page.
-        # If using a user/organization page, remove the `${{ github.event.repository.name }}` part.
-        # using --public-url something will allow trunk to modify all the href paths like from favicon.ico to repo_name/favicon.ico .
-        # this is necessary for github pages where the site is deployed to username.github.io/repo_name and all files must be requested
-        # relatively as eframe_template/favicon.ico. if we skip public-url option, the href paths will instead request username.github.io/favicon.ico which
-        # will obviously return error 404 not found.
+        # Use repo-scoped URL by default so forks deploy correctly.
+        # Optional override: repository variable `PAGES_PUBLIC_URL`.
         run: ./trunk build --release --public-url $public_url --cargo-profile="web-release"
         env:
-          public_url: "https://www.cavaliercontours.dev"
+          public_url: ${{ steps.public-url.outputs.value }}
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4
         with:
