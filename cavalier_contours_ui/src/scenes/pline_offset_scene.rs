@@ -361,7 +361,7 @@ fn build_offset(
     let offset_opt = PlineOffsetOptions {
         handle_self_intersects: *handle_self_intersects,
         miter_limit: 100.0,
-        join_type: cavalier_contours::polyline::internal::pline_offset::JoinType::Miter,
+        join_type: LineJoin::Miter,
         ..Default::default()
     };
 
