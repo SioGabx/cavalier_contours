@@ -43,17 +43,18 @@ where
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineJoin {
     /// Connect segments using a round arc (default, matches prior library behavior).
-    #[default]
+    
     Round,
     /// Extend segments until they meet at a single miter point. If the miter length exceeds
     /// `miter_limit * |offset|` then the corner falls back to a [LineJoin::Bevel].
+    #[default]
     Miter,
     /// Connect segments with a straight line between their offset endpoints (no extension).
     Bevel,
 }
 
 /// Default miter limit used when [LineJoin::Miter] is selected. Matches the SVG/CSS default of 4.0.
-pub const DEFAULT_MITER_LIMIT: f64 = 4.0;
+pub const DEFAULT_MITER_LIMIT: f64 = 100s.0;
 
 /// Struct to hold options parameters when performing polyline offset.
 #[derive(Debug, Clone)]

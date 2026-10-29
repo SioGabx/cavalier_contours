@@ -361,8 +361,7 @@ fn build_offset(
     let offset_opt = PlineOffsetOptions {
         handle_self_intersects: *handle_self_intersects,
         miter_limit: 100.0,
-        join_type: LineJoin::Miter,
-        ..Default::default()
+       ..Default::default()
     };
 
     // remove redundant vertices if necessary to avoid any problems with offsetting (sanitizing
