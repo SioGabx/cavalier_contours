@@ -360,6 +360,8 @@ fn build_offset(
     let mut all_offset_plines = Vec::new();
     let offset_opt = PlineOffsetOptions {
         handle_self_intersects: *handle_self_intersects,
+        miter_limit: 100.0,
+        join_type: cavalier_contours::polyline::internal::pline_offset::JoinType::Miter,
         ..Default::default()
     };
 
