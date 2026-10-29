@@ -54,7 +54,7 @@ pub enum LineJoin {
 }
 
 /// Default miter limit used when [LineJoin::Miter] is selected. Matches the SVG/CSS default of 4.0.
-pub const DEFAULT_MITER_LIMIT: f64 = 100s.0;
+pub const DEFAULT_MITER_LIMIT: f64 = 100.0;
 
 /// Struct to hold options parameters when performing polyline offset.
 #[derive(Debug, Clone)]
